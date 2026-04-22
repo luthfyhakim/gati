@@ -32,7 +32,8 @@ class TrackingController extends GetxController {
   final TextEditingController nameController = TextEditingController();
   final TextEditingController descriptionController = TextEditingController();
 
-  final Rx<Position?> initialPosition = null.obs;
+  final Rx<Position?> initialPosition = Rx<Position?>(null);
+  final RxBool isLoading = true.obs;
 
   String? _userEmail;
 
@@ -95,11 +96,13 @@ class TrackingController extends GetxController {
 
   void getInitialPosition() async {
     try {
-      initialPosition.value = await _trackingService.getCurrentPosition();
-      print('Initial position: ${initialPosition.value}');
+      Position? position = await _trackingService.getCurrentPosition();
+      initialPosition.value = position;
     } catch (error) {
-      // print(error);
-      // Get.snackbar('Error', error.toString());
+      print(error);
+      Get.snackbar('Error', error.toString());
+    } finally {
+      isLoading.value = false;
     }
   }
 

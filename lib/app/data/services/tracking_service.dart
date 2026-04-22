@@ -23,7 +23,7 @@ class TrackingService extends GetxService {
   Duration _pausedDuration = Duration.zero;
   DateTime? _pausedAt;
 
-  Future<Position> getCurrentPosition() async {
+  Future<Position?> getCurrentPosition() async {
     await _ensurePermissions();
     final position = await Geolocator.getCurrentPosition(
       locationSettings: AppleSettings(

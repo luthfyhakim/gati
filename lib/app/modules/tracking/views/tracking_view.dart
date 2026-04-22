@@ -27,13 +27,20 @@ class TrackingView extends GetView<TrackingController> {
           return Stack(
             children: [
               // Full screen map
-              Positioned.fill(
-                child: _FullScreenMap(
-                  points: controller.points.toList(),
-                  isTracking: controller.isTracking.value,
-                  initialPosition: controller.initialPosition.value,
-                ),
-              ),
+              Obx(() {
+                if (controller.isLoading.value){
+                  return const Center(child: CircularProgressIndicator());
+                }
+                else{
+                  return Positioned.fill(
+                    child: _FullScreenMap(
+                      points: controller.points.toList(),
+                      isTracking: controller.isTracking.value,
+                      initialPosition: controller.initialPosition.value,
+                    ),
+                  );
+                }
+              }),
               // Back button
               Positioned(
                 top: 8,
@@ -151,7 +158,7 @@ class _FullScreenMap extends StatelessWidget {
       options: MapOptions(
         initialCenter: initialPosition != null
             ? LatLng(initialPosition!.latitude, initialPosition!.longitude)
-            : const LatLng(-6.1751, 106.8650),
+            : LatLng(0, 0),
         initialZoom: 16,
         interactionOptions: const InteractionOptions(
           flags: InteractiveFlag.pinchZoom | InteractiveFlag.drag,
