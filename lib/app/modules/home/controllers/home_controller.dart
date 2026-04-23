@@ -88,6 +88,11 @@ class HomeController extends GetxController {
     super.onInit();
     _userEmail = _authRepository.currentUserEmail();
     _userFullName = _authRepository.currentUserFullName();
+  }
+
+  @override
+  void onReady() {
+    super.onReady();
     if (_userEmail == null) {
       Get.offAllNamed(Routes.login);
     } else {

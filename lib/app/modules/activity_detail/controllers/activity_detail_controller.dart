@@ -28,6 +28,11 @@ class ActivityDetailController extends GetxController {
     super.onInit();
     _userEmail = _authRepository.currentUserEmail();
     _activityId = Get.arguments as String?;
+  }
+
+  @override
+  void onReady() {
+    super.onReady();
     if (_userEmail == null) {
       Get.offAllNamed(Routes.login);
       return;

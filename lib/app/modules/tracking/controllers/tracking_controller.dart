@@ -75,12 +75,10 @@ class TrackingController extends GetxController {
 
   @override
   void onInit() {
-    getInitialPosition();
     super.onInit();
     _userEmail = _authRepository.currentUserEmail();
-    if (_userEmail == null) {
-      Get.offAllNamed(Routes.login);
-    }
+
+    // Check if activity type was passed as argument
 
     // Check if activity type was passed as argument
     final args = Get.arguments;
@@ -90,7 +88,16 @@ class TrackingController extends GetxController {
         selectedType.value = type;
       }
     } else if (args is ActivityType) {
-      selectedType.value = args;
+    }
+  }
+
+  @override
+  void onReady() {
+    super.onReady();
+    if (_userEmail == null) {
+      Get.offAllNamed(Routes.login);
+    } else {
+      getInitialPosition();
     }
   }
 
