@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart' show Position;
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
+import 'package:latlong2/latlong.dart';
 
 import 'package:gati/app/core/exceptions/app_exception.dart';
 import 'package:gati/app/data/models/activity_model.dart';
@@ -12,7 +14,8 @@ import 'package:gati/app/data/repositories/auth_repository.dart';
 import 'package:gati/app/data/services/tracking_service.dart';
 import 'package:gati/app/routes/app_pages.dart';
 
-class TrackingController extends GetxController {
+class TrackingController extends GetxController
+    with GetSingleTickerProviderStateMixin {
   TrackingController(
     this._trackingService,
     this._activityRepository,
@@ -23,9 +26,15 @@ class TrackingController extends GetxController {
   final ActivityRepository _activityRepository;
   final AuthRepository _authRepository;
 
+  final MapController mapController = MapController();
+  final RxBool isAutoTracking = true.obs;
+  final RxBool isSplitsExpanded = false.obs;
+
+  AnimationController? _animationController;
+
   final Rx<ActivityType> selectedType = ActivityType.run.obs;
   final RxBool isSaving = false.obs;
-  final RxBool isPaused = false.obs;
+  RxBool get isPaused => _trackingService.isPaused;
   final RxBool showComplete = false.obs;
 
   /// Text controllers for user-editable fields on the complete screen.
@@ -44,7 +53,10 @@ class TrackingController extends GetxController {
   RxList<ActivityPoint> get points => _trackingService.routePoints;
   RxDouble get distance => _trackingService.totalDistance;
   Rx<Duration> get duration => _trackingService.elapsed;
+  Rx<Duration> get totalElapsed => _trackingService.totalElapsed;
   RxBool get isTracking => _trackingService.isTracking;
+  RxDouble get elevationGain => _trackingService.elevationGain;
+  RxList<double> get splits => _trackingService.splits;
 
   // Completed activity getters
   List<ActivityPoint> get completedPoints => _completedPointsData;
@@ -68,6 +80,21 @@ class TrackingController extends GetxController {
     return _completedActivity!.averageSpeedKmh.toStringAsFixed(1);
   }
 
+  String get completedPace {
+    if (_completedActivity == null) return '0:00';
+    return _completedActivity!.averagePace;
+  }
+
+  String get completedElevationGain {
+    if (_completedActivity == null) return '0';
+    return _completedActivity!.elevationGain.toStringAsFixed(0);
+  }
+
+  String get completedMaxElevation {
+    if (_completedActivity == null) return '0';
+    return _completedActivity!.maxElevation.toStringAsFixed(0);
+  }
+
   String get completedDate {
     if (_completedActivity == null) return '';
     return DateFormat('MMM d').format(_completedActivity!.startedAt);
@@ -78,7 +105,22 @@ class TrackingController extends GetxController {
     super.onInit();
     _userEmail = _authRepository.currentUserEmail();
 
-    // Check if activity type was passed as argument
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 1),
+    );
+
+    // Listen to points and update camera if auto-tracking is enabled
+    ever(points, (List<ActivityPoint> p) {
+      if (isAutoTracking.value && p.isNotEmpty && !showComplete.value) {
+        final lastPoint = p.last;
+        _animatedMapMove(
+          LatLng(lastPoint.latitude, lastPoint.longitude),
+          mapController.camera.zoom,
+          offsetCenter: true,
+        );
+      }
+    });
 
     // Check if activity type was passed as argument
     final args = Get.arguments;
@@ -88,6 +130,94 @@ class TrackingController extends GetxController {
         selectedType.value = type;
       }
     } else if (args is ActivityType) {
+      selectedType.value = args;
+    }
+  }
+
+  /// Smoothly moves the map to a target position with an optional vertical offset.
+  void _animatedMapMove(
+    LatLng destLocation,
+    double destZoom, {
+    bool offsetCenter = false,
+  }) {
+    // Apply a vertical offset to push the center "up"
+    final LatLng finalLocation = offsetCenter
+        ? LatLng(destLocation.latitude - 0.002, destLocation.longitude)
+        : destLocation;
+
+    final AnimationController? controller = _animationController;
+    if (controller == null) {
+      try {
+        mapController.move(finalLocation, destZoom);
+      } catch (_) {
+        // Map not ready
+      }
+      return;
+    }
+
+    try {
+      final latTween = Tween<double>(
+        begin: mapController.camera.center.latitude,
+        end: finalLocation.latitude,
+      );
+      final lngTween = Tween<double>(
+        begin: mapController.camera.center.longitude,
+        end: finalLocation.longitude,
+      );
+      final zoomTween = Tween<double>(
+        begin: mapController.camera.zoom,
+        end: destZoom,
+      );
+
+      final Animation<double> animation = CurvedAnimation(
+        parent: controller,
+        curve: Curves.easeInOutCubic,
+      );
+
+      controller.reset();
+
+      animation.addListener(() {
+        try {
+          mapController.move(
+            LatLng(latTween.evaluate(animation), lngTween.evaluate(animation)),
+            zoomTween.evaluate(animation),
+          );
+        } catch (_) {
+          // Map disposed or not ready during animation
+        }
+      });
+
+      controller.forward();
+    } catch (e) {
+      // mapController.camera might throw if not ready
+      debugPrint('Map not ready: $e');
+    }
+  }
+
+  void centerMap() {
+    LatLng? target;
+    if (points.isEmpty) {
+      if (initialPosition.value != null) {
+        target = LatLng(
+          initialPosition.value!.latitude,
+          initialPosition.value!.longitude,
+        );
+      }
+    } else {
+      target = LatLng(points.last.latitude, points.last.longitude);
+    }
+
+    if (target != null) {
+      _animatedMapMove(target, 16, offsetCenter: true);
+      isAutoTracking.value = true;
+    }
+  }
+
+  void onMapEvent(MapEvent event) {
+    // If the user manually drags the map, disable auto-tracking
+    if (event is MapEventMoveStart &&
+        event.source == MapEventSource.dragStart) {
+      isAutoTracking.value = false;
     }
   }
 
@@ -105,16 +235,29 @@ class TrackingController extends GetxController {
     try {
       Position? position = await _trackingService.getCurrentPosition();
       initialPosition.value = position;
+
+      // First, set loading to false to render the map
+      isLoading.value = false;
+
+      // Wait for the next frame to ensure FlutterMap is rendered
+      if (position != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _animatedMapMove(
+            LatLng(position.latitude, position.longitude),
+            16,
+            offsetCenter: true,
+          );
+        });
+      }
     } catch (error) {
-      print(error);
       Get.snackbar('Error', error.toString());
-    } finally {
       isLoading.value = false;
     }
   }
 
   @override
   void onClose() {
+    _animationController?.dispose();
     nameController.dispose();
     descriptionController.dispose();
     super.onClose();
@@ -127,7 +270,6 @@ class TrackingController extends GetxController {
   Future<void> startTracking() async {
     try {
       await _trackingService.start();
-      isPaused.value = false;
     } on PermissionException catch (error) {
       Get.snackbar('Permission error', error.message);
     } catch (error) {
@@ -141,7 +283,6 @@ class TrackingController extends GetxController {
     } else {
       _trackingService.pause();
     }
-    isPaused.value = !isPaused.value;
   }
 
   Future<void> stopTracking() async {
@@ -218,7 +359,6 @@ class TrackingController extends GetxController {
 
   Future<void> cancelTracking() async {
     await _trackingService.cancel();
-    isPaused.value = false;
   }
 
   void openHistory() {
@@ -237,11 +377,36 @@ class TrackingController extends GetxController {
     final meters = distance.value;
     final seconds = duration.value.inSeconds;
     if (meters <= 0 || seconds <= 0) {
-      return '0.0';
+      return '0:00';
     }
-    final speedKmh = (meters / 1000) / (seconds / 3600);
-    return speedKmh.toStringAsFixed(1);
+    final distanceKm = meters / 1000;
+    final secondsPerKm = seconds / distanceKm;
+
+    final minutes = (secondsPerKm / 60).floor();
+    final remainingSeconds = (secondsPerKm % 60).round();
+
+    return '$minutes:${remainingSeconds.toString().padLeft(2, '0')}';
   }
+
+  String get formattedSplitPace {
+    final currentDist = distance.value;
+    final lastSplitDist = _trackingService.lastSplitDistance;
+    final distDiff = (currentDist - lastSplitDist) / 1000;
+
+    if (distDiff <= 0.05) return '-:--'; // Need at least 50m for a stable pace
+
+    final currentTime = duration.value;
+    final lastSplitTime = _trackingService.lastSplitDuration;
+    final timeDiff = (currentTime - lastSplitTime).inSeconds;
+
+    final secondsPerKm = timeDiff / distDiff;
+    final minutes = (secondsPerKm / 60).floor();
+    final seconds = (secondsPerKm % 60).round();
+
+    return '$minutes:${seconds.toString().padLeft(2, '0')}';
+  }
+
+  String get formattedElevationGain => elevationGain.value.toStringAsFixed(0);
 
   String get formattedDuration {
     final d = duration.value;
@@ -256,5 +421,52 @@ class TrackingController extends GetxController {
     final minutes = d.inMinutes.toString().padLeft(2, '0');
     final seconds = (d.inSeconds % 60).toString().padLeft(2, '0');
     return '$minutes:$seconds';
+  }
+
+  String get formattedElapsed {
+    final d = totalElapsed.value;
+    final hours = d.inHours.toString().padLeft(2, '0');
+    final minutes = (d.inMinutes % 60).toString().padLeft(2, '0');
+    final seconds = (d.inSeconds % 60).toString().padLeft(2, '0');
+    return '$hours:$minutes:$seconds';
+  }
+
+  /// Returns the pace for the current (incomplete) kilometer split in seconds.
+  double get currentSplitPaceSeconds {
+    final currentDist = distance.value;
+    final lastSplitDist = _trackingService.lastSplitDistance;
+    final distDiff = (currentDist - lastSplitDist) / 1000;
+
+    if (distDiff <= 0.005) return 0; // Need at least 5m for any calculation
+
+    final currentTime = duration.value;
+    final lastSplitTime = _trackingService.lastSplitDuration;
+    final timeDiff = (currentTime - lastSplitTime).inSeconds;
+
+    return timeDiff / distDiff;
+  }
+
+  /// Returns a list of split times (seconds per km) for display.
+  /// Includes completed splits plus the current segment.
+  /// Guaranteed to have at least 3 items (padded with 0) and at most 5 items (most recent).
+  List<double> get displaySplits {
+    final List<double> allSplits = List.from(splits);
+
+    // Add current segment if tracking
+    if (isTracking.value) {
+      allSplits.add(currentSplitPaceSeconds);
+    }
+
+    // Take last 5
+    final recentSplits = allSplits.length > 5
+        ? allSplits.sublist(allSplits.length - 5)
+        : allSplits;
+
+    // Ensure at least 3 items
+    while (recentSplits.length < 3) {
+      recentSplits.add(0.0);
+    }
+
+    return recentSplits;
   }
 }

@@ -10,9 +10,13 @@ class Activity {
     required this.endedAt,
     required this.distanceMeters,
     required this.duration,
+    required this.elapsedDuration,
     required this.route,
     required this.title,
     this.description = '',
+    this.elevationGain = 0.0,
+    this.maxElevation = 0.0,
+    this.splits = const [],
   });
 
   final String id;
@@ -21,10 +25,14 @@ class Activity {
   final DateTime startedAt;
   final DateTime endedAt;
   final double distanceMeters;
-  final Duration duration;
+  final Duration duration; // Moving Time
+  final Duration elapsedDuration; // Total Time
   final List<ActivityPoint> route;
   final String title;
   final String description;
+  final double elevationGain;
+  final double maxElevation;
+  final List<double> splits; // Pace in seconds per km
 
   double get distanceKm => distanceMeters / 1000;
 
@@ -34,6 +42,19 @@ class Activity {
     }
     final hours = duration.inSeconds / 3600;
     return distanceKm / hours;
+  }
+
+  String get averagePace {
+    if (distanceMeters <= 0 || duration.inSeconds == 0) {
+      return '0:00';
+    }
+    final totalSeconds = duration.inSeconds;
+    final secondsPerKm = totalSeconds / distanceKm;
+    
+    final minutes = (secondsPerKm / 60).floor();
+    final seconds = (secondsPerKm % 60).round();
+    
+    return '$minutes:${seconds.toString().padLeft(2, '0')}';
   }
 
   /// Creates a copy of this activity with optional overrides.
@@ -46,9 +67,13 @@ class Activity {
       endedAt: endedAt,
       distanceMeters: distanceMeters,
       duration: duration,
+      elapsedDuration: elapsedDuration,
       route: route,
       title: title ?? this.title,
       description: description ?? this.description,
+      elevationGain: elevationGain,
+      maxElevation: maxElevation,
+      splits: splits,
     );
   }
 
@@ -60,8 +85,12 @@ class Activity {
     'endedAt': endedAt.toIso8601String(),
     'distanceMeters': distanceMeters,
     'durationSeconds': duration.inSeconds,
+    'elapsedSeconds': elapsedDuration.inSeconds,
     'title': title,
     'description': description,
+    'elevationGain': elevationGain,
+    'maxElevation': maxElevation,
+    'splits': splits,
     'route': route.map((point) => point.toMap()).toList(),
   };
 
@@ -74,8 +103,12 @@ class Activity {
       endedAt: DateTime.parse(map['endedAt'] as String),
       distanceMeters: (map['distanceMeters'] as num).toDouble(),
       duration: Duration(seconds: map['durationSeconds'] as int),
+      elapsedDuration: Duration(seconds: (map['elapsedSeconds'] as int? ?? map['durationSeconds'] as int)),
       title: map['title'] as String,
       description: (map['description'] as String?) ?? '',
+      elevationGain: (map['elevationGain'] as num? ?? 0.0).toDouble(),
+      maxElevation: (map['maxElevation'] as num? ?? 0.0).toDouble(),
+      splits: (map['splits'] as List<dynamic>?)?.map((e) => (e as num).toDouble()).toList() ?? [],
       route: ((map['route'] as List<dynamic>).cast<Map<String, dynamic>>())
           .map(ActivityPoint.fromMap)
           .toList(),

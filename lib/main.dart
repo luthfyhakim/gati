@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter_native_splash/flutter_native_splash.dart';
 import 'package:get/get.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -13,7 +14,8 @@ import 'app/data/services/tracking_service.dart';
 import 'app/routes/app_pages.dart';
 
 Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
+  FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
 
   await dotenv.load(fileName: ".env");
   await Supabase.initialize(
@@ -30,14 +32,37 @@ Future<void> main() async {
   Get.put<ActivityService>(ActivityService(storage), permanent: true);
   Get.put<TrackingService>(TrackingService(), permanent: true);
   Get.put<SportGearService>(SportGearService(), permanent: true);
-  Get.put<AuthRepository>(AuthRepository(Get.find()), permanent: true);
+  final authRepository = Get.put<AuthRepository>(
+    AuthRepository(Get.find()),
+    permanent: true,
+  );
   Get.put<ActivityRepository>(ActivityRepository(Get.find()), permanent: true);
 
-  runApp(const GatiApp());
+  // Resolve initial route before running the app to avoid flickering
+  String initialRoute = Routes.login;
+  try {
+    final hasCompletedOnboarding = storage.isOnboardingCompleted();
+    final hasSession = await authRepository.hasActiveSession();
+
+    if (hasSession) {
+      initialRoute = Routes.home;
+    } else if (!hasCompletedOnboarding) {
+      initialRoute = Routes.welcome;
+    } else {
+      initialRoute = Routes.login;
+    }
+  } catch (_) {
+    initialRoute = Routes.login;
+  }
+
+  runApp(GatiApp(initialRoute: initialRoute));
+  FlutterNativeSplash.remove();
 }
 
 class GatiApp extends StatelessWidget {
-  const GatiApp({super.key});
+  const GatiApp({super.key, required this.initialRoute});
+
+  final String initialRoute;
 
   @override
   Widget build(BuildContext context) {
@@ -48,7 +73,7 @@ class GatiApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF4DB6AC)),
         useMaterial3: true,
       ),
-      initialRoute: AppPages.initial,
+      initialRoute: initialRoute,
       getPages: AppPages.routes,
     );
   }
